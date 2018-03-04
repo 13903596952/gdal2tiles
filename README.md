@@ -1,3 +1,9 @@
+# 代码组成
+有三个项目<br>
+gdal2tile-mapslicer（可以忽略）<br>
+gdal2tile-python(参考，如要运行，需要配置python，和gdal，gdal-data等)<br>
+gdal2tile-core（真正的java重写版本）
+
 # gdal2tiles
 将gdal中python脚本gdal2tiles.py 用java重写
 
