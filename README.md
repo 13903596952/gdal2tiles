@@ -1,4 +1,9 @@
 # gdal2tiles
+有三个项目<br>
+gdal2tile-mapslicer（可以忽略）
+gdal2tile-python(参考，如要运行，需要配置python，和gdal，gdal-data等)
+gdal2tile-core（真正的java重写版本）
+
 将gdal中python脚本gdal2tiles.py 用java重写
 
 原来gdal2tiles.py支持gdal本身支持的栅格格式，我这边只支持GeoPDF（ArcGIS导出的），如果要支持其他格式，修改读取栅格逻辑部分。
