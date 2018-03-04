@@ -422,7 +422,7 @@ class GlobalGeodetic(object):
 
 
 # ---------------------
-# TODO: Finish Zoomify implemtentation!!!
+
 class Zoomify(object):
     """
     Tiles compatible with the Zoomify viewer
