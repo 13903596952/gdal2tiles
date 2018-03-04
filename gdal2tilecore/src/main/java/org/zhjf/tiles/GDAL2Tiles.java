@@ -5,6 +5,7 @@ import com.mortennobel.imagescaling.ResampleFilters;
 import com.mortennobel.imagescaling.ResampleOp;
 import com.vividsolutions.jts.geom.Coordinate;
 import com.vividsolutions.jts.geom.Envelope;
+import mil.nga.geopackage.BoundingBox;
 import org.apache.commons.cli.*;
 import org.gdal.gdal.Dataset;
 import org.gdal.gdal.gdal;
@@ -21,6 +22,7 @@ import javax.sql.DataSource;
 import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.io.*;
+import java.sql.SQLException;
 import java.util.*;
 import java.util.List;
 
@@ -66,8 +68,9 @@ public class GDAL2Tiles {
     private int[] in_nodata;
     private String tiledriver = "";
     private boolean overviewquery = false;
+    public static boolean geopackage = false;
 
-    public void process() throws IOException {
+    public void process() throws IOException, SQLException {
         // Opening and preprocessing of the input file
         open_input();
 
@@ -344,10 +347,19 @@ public class GDAL2Tiles {
                 this.tsize[tz] = Math.ceil(tsize);
                 this.tminmax.add(tz, new int[]{tminxy[0], tminxy[1], tmaxxy[0], tmaxxy[1]});
             }
-
 //            this.tileswne = new int[]{0, 0, 0, 0};
         }
+
+        try {
+            if (geopackage)
+                Main.geopackageUtil.createTileTable("home", getBoundBox(), this.tminz, this.tmaxz, this.tileext);
+        } catch (IOException e) {
+            e.printStackTrace();
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
     }
+
 
     private void generate_metadata() {
 
@@ -417,7 +429,7 @@ public class GDAL2Tiles {
     /**
      * Generation of the base tiles (the lowest in the pyramid) directly from the input raster
      */
-    private void generate_base_tiles() {
+    private void generate_base_tiles() throws SQLException {
         int tminx = this.tminmax.get(this.tmaxz)[0];
         int tminy = this.tminmax.get(this.tmaxz)[1];
         int tmaxx = this.tminmax.get(this.tmaxz)[2];
@@ -537,6 +549,8 @@ public class GDAL2Tiles {
                 if (!this.options.get("resampling").equals("antialias")) {
                     try {
                         ImageIO.write(dstile, this.tileext, new File(tilefilename));   //将其保存在C:/imageSort/targetPIC/下
+                        if (geopackage)
+                            Main.geopackageUtil.insertTile(new File(tilefilename), tz, tx, ty);
                     } catch (IOException e) {
                         e.printStackTrace();
                     }
@@ -547,9 +561,12 @@ public class GDAL2Tiles {
                 }
             }
         }
+
+        if (geopackage)
+            Main.geopackageUtil.createMatrix(tz);
     }
 
-    private void generate_overview_tiles() throws IOException {
+    private void generate_overview_tiles() throws IOException, SQLException {
         System.out.println("Generating Overview Tiles:");
 
         int tcount = 0;
@@ -623,6 +640,8 @@ public class GDAL2Tiles {
                     if (!this.options.get("resampling").equals("antialias")) {
                         try {
                             ImageIO.write(dstile, this.tileext, new File(tilefilename));   //将其保存在C:/imageSort/targetPIC/下
+                            if (geopackage)
+                                Main.geopackageUtil.insertTile(new File(tilefilename), tz, tx, ty);
                         } catch (IOException e) {
                             e.printStackTrace();
                         }
@@ -633,7 +652,11 @@ public class GDAL2Tiles {
                     }
                 }
             }
+            if (geopackage)
+                Main.geopackageUtil.createMatrix(tz);
         }
+        if (geopackage)
+            Main.geopackageUtil.close();
     }
 
     private BufferedImage scale_query_to_tile(BufferedImage dsquery, int tilesize) {
@@ -936,6 +959,19 @@ public class GDAL2Tiles {
         //84(102.76954650878781, 2.5533771416895517e-06, 0.0, 25.013439812256067, 0.0, -2.553377141690922e-06)
 
         return new double[]{envelope.getMinX(), widthResolution, 0.0, envelope.getMinY(), 0.0, heightResolution};
+    }
+
+    private BoundingBox getBoundBox() {
+        Envelope envelope = reader.getEnvelope();
+        if (this.options.get("profile").equals("mercator")) {
+            envelope = reader.getEnvelope();
+            double[] min = lonLat2Mercator(envelope.getMinX(), envelope.getMinY());
+            double[] max = lonLat2Mercator(envelope.getMaxX(), envelope.getMaxY());
+            envelope = new Envelope();
+            envelope.init(min[0], max[0], min[1], max[1]);
+        }
+
+        return new BoundingBox(envelope.getMinX(), envelope.getMaxX(), envelope.getMaxX(), envelope.getMaxY());
     }
 
     public double[] lonLat2Mercator(double lon, double lat) {

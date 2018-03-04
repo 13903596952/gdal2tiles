@@ -34,23 +34,28 @@ import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.FileAlreadyExistsException;
 import java.sql.SQLException;
 import java.util.List;
 
 public class GeopackageUtil {
     private Integer tileWidth = null;
     private Integer tileHeight = null;
+    private GeoPackage geoPackage;
+    private TileMatrixSet tileMatrixSet;
+    private TileGrid tileGrid;
+    private String extension;
+    private Contents contents;
+    private TileMatrixDao tileMatrixDao;
 
 
-    public void initGeopackage(String file) {
+    public void initGeopackage(String file) throws FileAlreadyExistsException {
         File newGeoPackage = new File(file);
-
-        // Create a new GeoPackage
+        if (newGeoPackage.exists())
+            throw new FileAlreadyExistsException("文件存在");
         boolean created = GeoPackageManager.create(newGeoPackage);
         if (created) {
-            // Open a GeoPackage
-            GeoPackage geoPackage = GeoPackageManager.open(newGeoPackage);
-
+            geoPackage = GeoPackageManager.open(newGeoPackage);
             // GeoPackage Table DAOs
 //        ContentsDao contentsDao = geoPackage.getContentsDao();
 //        GeometryColumnsDao geomColumnsDao = geoPackage.getGeometryColumnsDao();
@@ -61,14 +66,6 @@ public class GeopackageUtil {
 //        MetadataDao metadataDao = geoPackage.getMetadataDao();
 //        MetadataReferenceDao metadataReferenceDao = geoPackage.getMetadataReferenceDao();
 //        ExtensionsDao extensionsDao = geoPackage.getExtensionsDao();
-
-            try {
-                createTileTable(geoPackage);
-            } catch (IOException e) {
-                e.printStackTrace();
-            } catch (SQLException e) {
-                e.printStackTrace();
-            }
 
 //            // Feature and tile tables
 //            List<String> features = geoPackage.getFeatureTables();
@@ -87,22 +84,30 @@ public class GeopackageUtil {
 //            int indexedCount = indexer.index();
 
             // Close database when done
+        }
+    }
+
+    public void close() {
+        if (geoPackage != null) {
             geoPackage.close();
         }
     }
 
-    private void createTileTable(GeoPackage geoPackage) throws IOException, SQLException {
+
+    public void createTileTable(String tbName, BoundingBox boundingBox, int minZoom, int maxZoom, String ext) throws IOException, SQLException {
+        this.extension = ext;
         geoPackage.createTileMatrixSetTable();
         geoPackage.createTileMatrixTable();
+//        BoundingBox bitsBoundingBox = new BoundingBox(-11667347.997449303, 4824705.2253603265, -11666125.00499674, 4825928.217812888);
+//        createTiles("bit_systems", bitsBoundingBox, 15, 17, "png");
 
-        BoundingBox bitsBoundingBox = new BoundingBox(-11667347.997449303, 4824705.2253603265, -11666125.00499674, 4825928.217812888);
-        createTiles(geoPackage, "bit_systems", bitsBoundingBox, 15, 17, "png");
+//        BoundingBox ngaBoundingBox = new BoundingBox(-8593967.964158937, 4685284.085768163, -8592744.971706374, 4687730.070673289);
+//        createTiles("nga", ngaBoundingBox, 15, 16, "png");
 
-        BoundingBox ngaBoundingBox = new BoundingBox(-8593967.964158937, 4685284.085768163, -8592744.971706374, 4687730.070673289);
-        createTiles(geoPackage, "nga", ngaBoundingBox, 15, 16, "png");
+        createTiles(tbName, boundingBox, minZoom, maxZoom, ext);
     }
 
-    private void createTiles(GeoPackage geoPackage, String name, BoundingBox boundingBox, int minZoomLevel, int maxZoomLevel, String extension) throws SQLException, IOException {
+    private void createTiles(String name, BoundingBox boundingBox, int minZoomLevel, int maxZoomLevel, String extension) throws SQLException, IOException {
         SpatialReferenceSystemDao srsDao = geoPackage.getSpatialReferenceSystemDao();
         SpatialReferenceSystem srs = srsDao.getOrCreateCode(ProjectionConstants.AUTHORITY_EPSG, (long) ProjectionConstants.EPSG_WEB_MERCATOR);
 
@@ -111,7 +116,7 @@ public class GeopackageUtil {
 
         ContentsDao contentsDao = geoPackage.getContentsDao();
 
-        Contents contents = new Contents();
+        contents = new Contents();
         contents.setTableName(name);
         contents.setDataType(ContentsDataType.TILES);
         contents.setIdentifier(name);
@@ -129,7 +134,7 @@ public class GeopackageUtil {
 
         TileMatrixSetDao tileMatrixSetDao = geoPackage.getTileMatrixSetDao();
 
-        TileMatrixSet tileMatrixSet = new TileMatrixSet();
+        tileMatrixSet = new TileMatrixSet();
         tileMatrixSet.setContents(contents);
         tileMatrixSet.setSrs(contents.getSrs());
         tileMatrixSet.setMinX(contents.getMinX());
@@ -138,76 +143,51 @@ public class GeopackageUtil {
         tileMatrixSet.setMaxY(contents.getMaxY());
         tileMatrixSetDao.create(tileMatrixSet);
 
-        TileMatrixDao tileMatrixDao = geoPackage.getTileMatrixDao();
+        tileMatrixDao = geoPackage.getTileMatrixDao();
 
-        final String tilesPath = "tiles/";
-
-        TileGrid tileGrid = totalTileGrid;
-
-        for (int zoom = minZoomLevel; zoom <= maxZoomLevel; zoom++) {
-            final String zoomPath = tilesPath + zoom + "/";
-
-            TileDao dao = geoPackage.getTileDao(tileMatrixSet);
-
-            for (long x = tileGrid.getMinX(); x <= tileGrid.getMaxX(); x++) {
-
-                final String xPath = zoomPath + x + "/";
-
-                for (long y = tileGrid.getMinY(); y <= tileGrid.getMaxY(); y++) {
-
-                    final String yPath = xPath + y + "." + extension;
-
-                    insertTile(new File(yPath));
-                }
-            }
-
-            if (tileWidth == null) {
-                tileWidth = 256;
-            }
-            if (tileHeight == null) {
-                tileHeight = 256;
-            }
-
-            long matrixWidth = tileGrid.getMaxX() - tileGrid.getMinX() + 1;
-            long matrixHeight = tileGrid.getMaxY() - tileGrid.getMinY() + 1;
-            double pixelXSize = (tileMatrixSet.getMaxX() - tileMatrixSet.getMinX()) / (matrixWidth * tileWidth);
-            double pixelYSize = (tileMatrixSet.getMaxY() - tileMatrixSet.getMinY()) / (matrixHeight * tileHeight);
-
-            TileMatrix tileMatrix = new TileMatrix();
-            tileMatrix.setContents(contents);
-            tileMatrix.setZoomLevel(zoom);
-            tileMatrix.setMatrixWidth(matrixWidth);
-            tileMatrix.setMatrixHeight(matrixHeight);
-            tileMatrix.setTileWidth(tileWidth);
-            tileMatrix.setTileHeight(tileHeight);
-            tileMatrix.setPixelXSize(pixelXSize);
-            tileMatrix.setPixelYSize(pixelYSize);
-            tileMatrixDao.create(tileMatrix);
-
-            tileGrid = TileBoundingBoxUtils.tileGridZoomIncrease(tileGrid, 1);
-        }
+        tileGrid = totalTileGrid;
     }
 
-    public void insertTile(File tileFile) throws IOException {
+    public void createMatrix(int zoom) throws SQLException {
+        if (tileWidth == null) {
+            tileWidth = 256;
+        }
+        if (tileHeight == null) {
+            tileHeight = 256;
+        }
+
+        long matrixWidth = tileGrid.getMaxX() - tileGrid.getMinX() + 1;
+        long matrixHeight = tileGrid.getMaxY() - tileGrid.getMinY() + 1;
+        double pixelXSize = (tileMatrixSet.getMaxX() - tileMatrixSet.getMinX()) / (matrixWidth * tileWidth);
+        double pixelYSize = (tileMatrixSet.getMaxY() - tileMatrixSet.getMinY()) / (matrixHeight * tileHeight);
+
+        TileMatrix tileMatrix = new TileMatrix();
+        tileMatrix.setContents(contents);
+        tileMatrix.setZoomLevel(zoom);
+        tileMatrix.setMatrixWidth(matrixWidth);
+        tileMatrix.setMatrixHeight(matrixHeight);
+        tileMatrix.setTileWidth(tileWidth);
+        tileMatrix.setTileHeight(tileHeight);
+        tileMatrix.setPixelXSize(pixelXSize);
+        tileMatrix.setPixelYSize(pixelYSize);
+        tileMatrixDao.create(tileMatrix);
+
+        tileGrid = TileBoundingBoxUtils.tileGridZoomIncrease(tileGrid, 1);
+    }
+
+    public void insertTile(File tileFile, int zoom, int x, int y) throws IOException {
+        TileDao dao = geoPackage.getTileDao(tileMatrixSet);
         if (tileFile != null && tileFile.exists()) {
             byte[] tileBytes = GeoPackageIOUtils.fileBytes(tileFile);
 
-            if (tileWidth == null || tileHeight == null) {
-                BufferedImage tileImage = ImageIO.read(tileFile);
-                if (tileImage != null) {
-                    tileHeight = tileImage.getHeight();
-                    tileWidth = tileImage.getWidth();
-                }
-            }
+            TileRow newRow = dao.newRow();
 
-//            TileRow newRow = dao.newRow();
-//
-//            newRow.setZoomLevel(zoom);
-//            newRow.setTileColumn(x - tileGrid.getMinX());
-//            newRow.setTileRow(y - tileGrid.getMinY());
-//            newRow.setTileData(tileBytes);
-//
-//            dao.create(newRow);
+            newRow.setZoomLevel(zoom);
+            newRow.setTileColumn(x - tileGrid.getMinX());
+            newRow.setTileRow(y - tileGrid.getMinY());
+            newRow.setTileData(tileBytes);
+
+            dao.create(newRow);
         }
     }
 
